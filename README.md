@@ -35,6 +35,54 @@ jobs:
           domain-id: 123
 ```
 
+### Vercel 部署成功後自動刷快取
+
+監聽 GitHub 的 `deployment_status` 事件，當 Vercel Production 部署成功時自動 purge。
+（前提：Vercel 專案已透過 GitHub 整合連接 — 這樣 Vercel 才會回寫 GitHub Deployment 狀態。）
+
+```yaml
+name: FurCDN Purge
+
+on:
+  deployment_status:
+
+jobs:
+  purge:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: FurCDN/github-action@v1
+        with:
+          action: purge
+          api-key: ${{ secrets.FURCDN_API_KEY }}
+          domain-id: 123
+```
+
+多個域名可以用 matrix 並行 purge：
+
+```yaml
+jobs:
+  purge:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment == 'Production'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        domain-id: [31, 32]
+    steps:
+      - uses: FurCDN/github-action@v1
+        with:
+          action: purge
+          api-key: ${{ secrets.FURCDN_API_KEY }}
+          domain-id: ${{ matrix.domain-id }}
+```
+
+> ⚠️ 含 `on: deployment_status` 的 workflow 檔案**必須先合進預設分支**（通常是 `main`），否則 GitHub 不會觸發；第一次接入時記得直推 `main`。
+
 ### 上傳 SSL 憑證
 
 ```yaml
