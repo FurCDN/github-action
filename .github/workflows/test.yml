@@ -38,7 +38,7 @@ jobs:
           }
           missing = expected_inputs - set(data["inputs"])
           assert not missing, f"missing inputs: {sorted(missing)}"
-          expected_outputs = {"result", "deployment-id", "url", "preview-url", "status"}
+          expected_outputs = {"result", "deployment-id", "status"}
           missing = expected_outputs - set(data["outputs"])
           assert not missing, f"missing outputs: {sorted(missing)}"
           assert data["inputs"]["base-url"]["default"] == "https://cdn.taipei"

@@ -33,7 +33,7 @@ inputs:
     required: false
     default: 'dist'
   branch:
-    description: 'Branch name reported to FurCDN Pages. Defaults to the site production branch. Usually ${{ github.ref_name }}.'
+    description: 'Branch name reported to FurCDN Pages. Defaults to the site production branch. Usually ${{ github.ref_name }}. Deployments from other branches are stored but not activated.'
     required: false
     default: ''
   message:
@@ -56,12 +56,6 @@ outputs:
   deployment-id:
     description: 'Pages deployment ID (pages-deploy only).'
     value: ${{ steps.pages.outputs.deployment-id }}
-  url:
-    description: 'Production URL of the Pages site (pages-deploy only).'
-    value: ${{ steps.pages.outputs.url }}
-  preview-url:
-    description: 'Preview URL of this deployment (pages-deploy only).'
-    value: ${{ steps.pages.outputs.preview-url }}
   status:
     description: 'Deployment status: ready | held (pages-deploy only).'
     value: ${{ steps.pages.outputs.status }}

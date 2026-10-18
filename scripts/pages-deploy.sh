@@ -172,9 +172,8 @@ jq -e . >/dev/null 2>&1 <<<"${body}" || die "FurCDN API 回應不是合法 JSON�
 
 deployment_id="$(json_field '.deployment.id')"
 status="$(json_field '.deployment.status')"
-url="$(json_field '.deployment.url')"
-[[ -n "${url}" ]] || url="$(json_field '.site.url')"
-preview_url="$(json_field '.deployment.previewUrl')"
+# 注意：jq 的 `//` 會把 false 視為空值，這裡要拿到字面上的 true/false
+active="$(jq -r '.deployment.active // false' <<<"${body}" 2>/dev/null || true)"
 
 if [[ -z "${deployment_id}" || -z "${status}" ]]; then
   die "FurCDN API 回應缺少 deployment 資訊：${body}"
@@ -182,8 +181,6 @@ fi
 
 {
   printf 'deployment-id=%s\n' "${deployment_id}"
-  printf 'url=%s\n' "${url}"
-  printf 'preview-url=%s\n' "${preview_url}"
   printf 'status=%s\n' "${status}"
   printf 'result<<__FURCDN_EOF__\n'
   printf '%s\n' "${body}"
@@ -194,13 +191,10 @@ echo "HTTP ${http_code}"
 echo "${body}"
 
 if [[ "${http_code}" == "202" || "${status}" == "held" ]]; then
-  warn "部署 #${deployment_id} 已上傳但進入待審核（內容掃描），管理員核准前不會上線。預覽網址：${preview_url}"
+  warn "部署 #${deployment_id} 已上傳但進入待審核（內容掃描），管理員核准前不會上線。"
+elif [[ "${status}" == "ready" && "${active}" != "true" ]]; then
+  echo "部署 #${deployment_id} 已儲存（非生產分支，不會自動上線）。"
+  echo "可在 FurCDN 後台 Pages 頁面，或執行 'furcdn pages activate ${SITE} ${deployment_id}' 啟用。"
 else
   echo "部署成功：deployment #${deployment_id}（status=${status}）"
-  if [[ -n "${url}" ]]; then
-    echo "網址：${url}"
-  fi
-  if [[ -n "${preview_url}" ]]; then
-    echo "預覽：${preview_url}"
-  fi
 fi

@@ -164,15 +164,17 @@ echo "1. 成功部署（含 branch/message/create，排除 .git 與 node_modules
 build_site
 rm -f "${SERVER_ROOT}/request.json" "${SERVER_ROOT}/body.bin"
 set_response <<'JSON'
-{"status":201,"body":{"deployment":{"id":42,"siteSlug":"demo","status":"ready","url":"https://demo.pages.furcdn.top","previewUrl":"https://demo--abc123.pages.furcdn.top","branch":"main"},"site":{"id":7,"slug":"demo","url":"https://demo.pages.furcdn.top"}}}
+{"status":201,"body":{"deployment":{"id":42,"siteSlug":"demo","status":"ready","active":false,"branch":"feature/x","url":"https://ignored.example.com","previewUrl":"https://ignored-preview.example.com"},"site":{"id":7,"slug":"demo"}}}
 JSON
 SITE_SLUG="demo" SITE_BRANCH="feature/x" SITE_MESSAGE="hello world 你好" SITE_CREATE="true"
 if run_deploy; then ok "exit code 0"; else bad "exit code 0"; fi
 assert_equals "$(output_value deployment-id)" "42" "output deployment-id"
-assert_equals "$(output_value url)" "https://demo.pages.furcdn.top" "output url"
-assert_equals "$(output_value preview-url)" "https://demo--abc123.pages.furcdn.top" "output preview-url"
 assert_equals "$(output_value status)" "ready" "output status"
+assert_not_contains "${OUT}" "url=" "不再提供 url output"
+assert_not_contains "${OUT}" "preview-url=" "不再提供 preview-url output"
 assert_contains "${OUT}" '"id":42' "output result 為原始 JSON"
+assert_contains "${LOG}" "非生產分支" "非生產分支提示需 activate"
+assert_contains "${LOG}" "furcdn pages activate demo 42" "提示啟用指令"
 assert_contains "${LOG}" "::add-mask::" "API key 有被 mask"
 
 REQUEST="${SERVER_ROOT}/request.json"
@@ -199,12 +201,14 @@ assert_equals "$(cat "${OWNERS}")" "0/0" "封存檔 owner/group 固定為 0/0"
 echo "2. 內容待審核（HTTP 202 + status=held）"
 build_site
 set_response <<'JSON'
-{"status":202,"body":{"held":true,"deployment":{"id":43,"status":"held","url":null,"previewUrl":"https://demo--held.pages.furcdn.top"},"site":{"id":7,"slug":"demo","url":"https://demo.pages.furcdn.top"}}}
+{"status":202,"body":{"held":true,"deployment":{"id":43,"status":"held","active":false},"site":{"id":7,"slug":"demo"}}}
 JSON
 SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then ok "held 時 step 仍成功"; else bad "held 時 step 仍成功"; fi
 assert_equals "$(output_value status)" "held" "output status=held"
 assert_contains "${LOG}" "::warning::" "held 時輸出 warning"
+assert_contains "${LOG}" "待審核" "warning 說明待審核"
+assert_not_contains "${OUT}" "preview-url=" "held 時沒有 preview-url output"
 assert_equals "$(jq -r '.path' "${REQUEST}")" "/api/v1/pages/sites/demo/deployments?via=action" "未傳 branch/message/create 時 query 精簡"
 
 # ── 3. 釣魚判定被擋（422） ──────────────────────────────────
@@ -280,11 +284,13 @@ if [[ -f "${SERVER_ROOT}/request.json" ]]; then bad "含 symlink 不應呼叫 AP
 echo "10. create-site=false 不帶 create 參數"
 build_site
 set_response <<'JSON'
-{"status":201,"body":{"deployment":{"id":44,"status":"ready","url":"https://demo.pages.furcdn.top","previewUrl":"https://demo--p.pages.furcdn.top"},"site":{"slug":"demo","url":"https://demo.pages.furcdn.top"}}}
+{"status":201,"body":{"deployment":{"id":44,"status":"ready","active":true},"site":{"slug":"demo"}}}
 JSON
 SITE_SLUG="demo" SITE_BRANCH="main" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then ok "create-site=false 成功"; else bad "create-site=false 成功"; fi
 assert_equals "$(jq -r '.path' "${REQUEST}")" "/api/v1/pages/sites/demo/deployments?via=action&branch=main" "無 create 參數"
+assert_contains "${LOG}" "部署成功" "生產分支部署成功訊息"
+assert_not_contains "${LOG}" "非生產分支" "生產分支不顯示 activate 提示"
 
 # ── 11. 非 JSON 回應不崩潰 ────────────────────────────────
 echo "11. 非 JSON 回應（例如反向代理錯誤頁）"

@@ -105,6 +105,8 @@ jobs:
 
 > **內測中**：Pages 需要內測碼。請先到 FurCDN 後台「Pages」頁面輸入內測碼解鎖，或執行 `furcdn pages beta redeem <code>`；未解鎖時 API 會回 `403 pages_beta_required`。
 
+> **站點沒有公開網址**：FurCDN Pages 不會給站點一個共用網域，內容只會出現在你自己的網域上。第一次使用時請先在 FurCDN 後台「Pages」頁面綁定網域，或執行 `furcdn pages bind`；部署成功後即在你綁定的網域生效。
+
 基本用法（分支等於站點的 production branch 時，部署成功後自動上線）：
 
 ```yaml
@@ -128,48 +130,10 @@ jobs:
           dir: dist
           branch: ${{ github.ref_name }}
           message: ${{ github.event.head_commit.message }}
-      - run: echo "已部署 ${{ steps.pages.outputs.url }}（${{ steps.pages.outputs.deployment-id }}）"
+      - run: echo "已部署 deployment #${{ steps.pages.outputs.deployment-id }}（${{ steps.pages.outputs.status }}）"
 ```
 
-`branch` 建議一律傳 `${{ github.ref_name }}`：等於站點的 production branch 時該次部署會自動上線，其他分支則只產生預覽網址。
-
-#### PR 預覽
-
-同一個 `site`，把 `branch` 設成 PR 的 head 分支即可；非 production branch 的部署不會影響正式站，只會得到 `preview-url`。
-
-```yaml
-name: Preview Pages
-on:
-  pull_request:
-
-jobs:
-  preview:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm ci && npm run build
-      - uses: FurCDN/github-action@v1
-        id: pages
-        with:
-          action: pages-deploy
-          api-key: ${{ secrets.FURCDN_API_KEY }}
-          site: my-site
-          dir: dist
-          branch: ${{ github.head_ref }}
-          message: "PR #${{ github.event.number }}"
-      - name: 在 PR 留言預覽網址
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v7
-        env:
-          PREVIEW_URL: ${{ steps.pages.outputs.preview-url }}
-        with:
-          script: |
-            github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.issue.number,
-              body: `Pages 預覽：${process.env.PREVIEW_URL}`,
-            })
-```
+`branch` 建議一律傳 `${{ github.ref_name }}`：等於站點的 production branch 時該次部署會自動上線；其他分支的 deployment 只會被儲存，不會影響正式站，需要時再到後台或執行 `furcdn pages activate <site> <deployment-id>` 啟用。
 
 #### 第一次部署時自動建站
 
@@ -210,7 +174,7 @@ jobs:
 | `key` | upload-ssl 必填 | `''` | PEM 私鑰字串 |
 | `site` | pages-deploy 必填 | `''` | Pages 站點 slug |
 | `dir` | — | `dist` | 要部署的目錄（根目錄需有 `index.html`） |
-| `branch` | — | `''` | 分支名稱；空值代表站點的 production branch。建議傳 `${{ github.ref_name }}` |
+| `branch` | — | `''` | 分支名稱；空值代表站點的 production branch。建議傳 `${{ github.ref_name }}`（非生產分支只儲存、不自動上線） |
 | `message` | — | `''` | 部署訊息（顯示在後台） |
 | `create-site` | — | `false` | 站點不存在時自動建立 |
 | `base-url` | — | `https://cdn.taipei` | API base URL |
@@ -221,8 +185,6 @@ jobs:
 |---|---|
 | `result` | FurCDN API 回應的原始 JSON 內容 |
 | `deployment-id` | Pages deployment ID（`pages-deploy`） |
-| `url` | Pages 站點網址（`pages-deploy`） |
-| `preview-url` | 這次部署的預覽網址（`pages-deploy`） |
 | `status` | 部署狀態：`ready` 或 `held`（`pages-deploy`） |
 
 ```yaml
@@ -245,7 +207,7 @@ jobs:
     site: my-site
     branch: ${{ github.ref_name }}
 
-- run: echo "${{ steps.pages.outputs.status }} ${{ steps.pages.outputs.preview-url }}"
+- run: echo "deployment ${{ steps.pages.outputs.deployment-id }}：${{ steps.pages.outputs.status }}"
 ```
 
 ## 錯誤處理
