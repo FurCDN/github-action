@@ -30,10 +30,6 @@ die() {
   exit 1
 }
 
-warn() {
-  echo "::warning::$*" >&2
-}
-
 # 避免 API key 出現在 log
 echo "::add-mask::${API_KEY}"
 
@@ -152,7 +148,6 @@ case "${http_code}" in
   *)
     api_error="$(json_field '.error')"
     api_code="$(json_field '.code')"
-    api_reasons="$(jq -r '(.reasons // []) | join("；")' <<<"${body}" 2>/dev/null || true)"
 
     detail="${api_error:-未知錯誤}"
     if [[ -n "${api_code}" ]]; then
@@ -160,9 +155,6 @@ case "${http_code}" in
     fi
     echo "${body}" >&2
     echo "::error::FurCDN Pages 部署失敗：HTTP ${http_code} — ${detail}" >&2
-    if [[ -n "${api_reasons}" ]]; then
-      echo "::error::內容掃描原因：${api_reasons}" >&2
-    fi
     exit 1
     ;;
 esac
@@ -171,17 +163,13 @@ esac
 jq -e . >/dev/null 2>&1 <<<"${body}" || die "FurCDN API 回應不是合法 JSON（HTTP ${http_code}）：${body}"
 
 deployment_id="$(json_field '.deployment.id')"
-status="$(json_field '.deployment.status')"
-# 注意：jq 的 `//` 會把 false 視為空值，這裡要拿到字面上的 true/false
-active="$(jq -r '.deployment.active // false' <<<"${body}" 2>/dev/null || true)"
 
-if [[ -z "${deployment_id}" || -z "${status}" ]]; then
+if [[ -z "${deployment_id}" ]]; then
   die "FurCDN API 回應缺少 deployment 資訊：${body}"
 fi
 
 {
   printf 'deployment-id=%s\n' "${deployment_id}"
-  printf 'status=%s\n' "${status}"
   printf 'result<<__FURCDN_EOF__\n'
   printf '%s\n' "${body}"
   printf '__FURCDN_EOF__\n'
@@ -189,12 +177,4 @@ fi
 
 echo "HTTP ${http_code}"
 echo "${body}"
-
-if [[ "${http_code}" == "202" || "${status}" == "held" ]]; then
-  warn "部署 #${deployment_id} 已上傳但進入待審核（內容掃描），管理員核准前不會上線。"
-elif [[ "${status}" == "ready" && "${active}" != "true" ]]; then
-  echo "部署 #${deployment_id} 已儲存（非生產分支，不會自動上線）。"
-  echo "可在 FurCDN 後台 Pages 頁面，或執行 'furcdn pages activate ${SITE} ${deployment_id}' 啟用。"
-else
-  echo "部署成功：deployment #${deployment_id}（status=${status}）"
-fi
+echo "部署成功：deployment #${deployment_id}"

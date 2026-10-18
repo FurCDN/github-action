@@ -56,9 +56,6 @@ outputs:
   deployment-id:
     description: 'Pages deployment ID (pages-deploy only).'
     value: ${{ steps.pages.outputs.deployment-id }}
-  status:
-    description: 'Deployment status: ready | held (pages-deploy only).'
-    value: ${{ steps.pages.outputs.status }}
 
 runs:
   using: 'composite'

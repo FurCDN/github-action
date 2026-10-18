@@ -130,7 +130,7 @@ jobs:
           dir: dist
           branch: ${{ github.ref_name }}
           message: ${{ github.event.head_commit.message }}
-      - run: echo "已部署 deployment #${{ steps.pages.outputs.deployment-id }}（${{ steps.pages.outputs.status }}）"
+      - run: echo "已部署 deployment #${{ steps.pages.outputs.deployment-id }}"
 ```
 
 `branch` 建議一律傳 `${{ github.ref_name }}`：等於站點的 production branch 時該次部署會自動上線；其他分支的 deployment 只會被儲存，不會影響正式站，需要時再到後台或執行 `furcdn pages activate <site> <deployment-id>` 啟用。
@@ -161,8 +161,6 @@ jobs:
 
 > 不支援符號連結（symlink）。若建置工具（例如 pnpm、Vite 的 linked workspace）在輸出目錄產生 symlink，請改用 `cp -rL`／`rsync -L` 展開成實體檔案後再部署，否則上傳前就會失敗（伺服器端也會以 `400 pages_bad_archive` 拒絕）。
 
-若內容掃描判定需要人工審核，API 會回 `202` 與 `status: held`：step 仍算成功，但會印出 warning，管理員核准後才上線。
-
 ## Inputs
 
 | 名稱 | 必填 | 預設 | 說明 |
@@ -185,7 +183,6 @@ jobs:
 |---|---|
 | `result` | FurCDN API 回應的原始 JSON 內容 |
 | `deployment-id` | Pages deployment ID（`pages-deploy`） |
-| `status` | 部署狀態：`ready` 或 `held`（`pages-deploy`） |
 
 ```yaml
 - id: purge
@@ -207,7 +204,7 @@ jobs:
     site: my-site
     branch: ${{ github.ref_name }}
 
-- run: echo "deployment ${{ steps.pages.outputs.deployment-id }}：${{ steps.pages.outputs.status }}"
+- run: echo "deployment #${{ steps.pages.outputs.deployment-id }}"
 ```
 
 ## 錯誤處理
@@ -219,11 +216,10 @@ jobs:
 {"error":"invalid api key"}
 ```
 
-`pages-deploy` 的錯誤會帶上伺服器的 `code`，內容掃描擋下的部署還會列出 `reasons`：
+`pages-deploy` 的錯誤會帶上伺服器的錯誤訊息與 `code`：
 
 ```
-::error::FurCDN Pages 部署失敗：HTTP 422 — 內容疑似釣魚網站，已拒絕部署（code=pages_content_blocked）
-::error::內容掃描原因：登入表單將密碼送往外部網域；冒用品牌名稱
+::error::FurCDN Pages 部署失敗：HTTP 413 — 站點超過 20 MB 上限（code=pages_site_too_large）
 ```
 
 ## 開發

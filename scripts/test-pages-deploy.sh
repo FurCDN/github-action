@@ -164,17 +164,16 @@ echo "1. 成功部署（含 branch/message/create，排除 .git 與 node_modules
 build_site
 rm -f "${SERVER_ROOT}/request.json" "${SERVER_ROOT}/body.bin"
 set_response <<'JSON'
-{"status":201,"body":{"deployment":{"id":42,"siteSlug":"demo","status":"ready","active":false,"branch":"feature/x","url":"https://ignored.example.com","previewUrl":"https://ignored-preview.example.com"},"site":{"id":7,"slug":"demo"}}}
+{"status":201,"body":{"deployment":{"id":42,"siteSlug":"demo","branch":"feature/x","url":"https://ignored.example.com","previewUrl":"https://ignored-preview.example.com"},"site":{"id":7,"slug":"demo"}}}
 JSON
 SITE_SLUG="demo" SITE_BRANCH="feature/x" SITE_MESSAGE="hello world 你好" SITE_CREATE="true"
 if run_deploy; then ok "exit code 0"; else bad "exit code 0"; fi
 assert_equals "$(output_value deployment-id)" "42" "output deployment-id"
-assert_equals "$(output_value status)" "ready" "output status"
+assert_not_contains "${OUT}" "status=" "不再提供 status output"
 assert_not_contains "${OUT}" "url=" "不再提供 url output"
 assert_not_contains "${OUT}" "preview-url=" "不再提供 preview-url output"
 assert_contains "${OUT}" '"id":42' "output result 為原始 JSON"
-assert_contains "${LOG}" "非生產分支" "非生產分支提示需 activate"
-assert_contains "${LOG}" "furcdn pages activate demo 42" "提示啟用指令"
+assert_contains "${LOG}" "部署成功：deployment #42" "成功訊息"
 assert_contains "${LOG}" "::add-mask::" "API key 有被 mask"
 
 REQUEST="${SERVER_ROOT}/request.json"
@@ -197,43 +196,31 @@ OWNERS="${WORK}/owners.txt"
 tar -tvzf "${SERVER_ROOT}/body.bin" | awk '{ print $2 }' | sort -u >"${OWNERS}"
 assert_equals "$(cat "${OWNERS}")" "0/0" "封存檔 owner/group 固定為 0/0"
 
-# ── 2. 待審核（202 held） ───────────────────────────────────
-echo "2. 內容待審核（HTTP 202 + status=held）"
-build_site
-set_response <<'JSON'
-{"status":202,"body":{"held":true,"deployment":{"id":43,"status":"held","active":false},"site":{"id":7,"slug":"demo"}}}
-JSON
-SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
-if run_deploy; then ok "held 時 step 仍成功"; else bad "held 時 step 仍成功"; fi
-assert_equals "$(output_value status)" "held" "output status=held"
-assert_contains "${LOG}" "::warning::" "held 時輸出 warning"
-assert_contains "${LOG}" "待審核" "warning 說明待審核"
-assert_not_contains "${OUT}" "preview-url=" "held 時沒有 preview-url output"
-assert_equals "$(jq -r '.path' "${REQUEST}")" "/api/v1/pages/sites/demo/deployments?via=action" "未傳 branch/message/create 時 query 精簡"
-
-# ── 3. 釣魚判定被擋（422） ──────────────────────────────────
-echo "3. 內容掃描判定釣魚（422 pages_content_blocked）"
-build_site
-set_response <<'JSON'
-{"status":422,"body":{"error":"內容疑似釣魚網站，已拒絕部署","code":"pages_content_blocked","reasons":["登入表單將密碼送往外部網域","冒用品牌名稱"]}}
-JSON
-if run_deploy; then bad "422 應失敗"; else ok "422 時 exit code 非 0"; fi
-assert_contains "${LOG}" "::error::" "422 輸出 ::error::"
-assert_contains "${LOG}" "code=pages_content_blocked" "錯誤含 code"
-assert_contains "${LOG}" "登入表單將密碼送往外部網域" "錯誤含 reasons"
-
-# ── 4. 未解鎖內測（403） ────────────────────────────────────
-echo "4. 未取得內測碼（403 pages_beta_required）"
+# ── 2. 伺服器 4xx：顯示 error 與 code ─────────────────────
+echo "2. 伺服器 4xx（403 pages_beta_required）"
 build_site
 set_response <<'JSON'
 {"status":403,"body":{"error":"FurCDN Pages 仍在內測，請先兌換內測碼","code":"pages_beta_required"}}
 JSON
+SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then bad "403 應失敗"; else ok "403 時 exit code 非 0"; fi
+assert_contains "${LOG}" "::error::" "403 輸出 ::error::"
 assert_contains "${LOG}" "code=pages_beta_required" "錯誤含 code"
+assert_contains "${LOG}" "仍在內測" "錯誤含伺服器訊息"
 assert_equals "$(cat "${OUT}")" "" "失敗時不寫 outputs"
 
-# ── 5. 本機驗證：slug 格式 ─────────────────────────────────
-echo "5. 本機驗證：slug 格式錯誤不發請求"
+# ── 3. 伺服器 413：不再輸出 reasons ───────────────────────
+echo "3. 伺服器 413（pages_site_too_large，不再輸出 reasons）"
+build_site
+set_response <<'JSON'
+{"status":413,"body":{"error":"站點超過 20 MB 上限","code":"pages_site_too_large","reasons":["這段不應被輸出"]}}
+JSON
+if run_deploy; then bad "413 應失敗"; else ok "413 時 exit code 非 0"; fi
+assert_contains "${LOG}" "code=pages_site_too_large" "錯誤含 code"
+assert_not_contains "${LOG}" "這段不應被輸出" "不再輸出 reasons"
+
+# ── 4. 本機驗證：slug 格式 ─────────────────────────────────
+echo "4. 本機驗證：slug 格式錯誤不發請求"
 build_site
 rm -f "${SERVER_ROOT}/request.json"
 SITE_SLUG="Bad_Slug" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
@@ -241,23 +228,23 @@ if run_deploy; then bad "非法 slug 應失敗"; else ok "非法 slug 時 exit c
 assert_contains "${LOG}" "::error::" "非法 slug 輸出 ::error::"
 if [[ -f "${SERVER_ROOT}/request.json" ]]; then bad "非法 slug 不應呼叫 API"; else ok "非法 slug 不呼叫 API"; fi
 
-# ── 6. 本機驗證：缺 index.html ─────────────────────────────
-echo "6. 本機驗證：缺根目錄 index.html"
+# ── 5. 本機驗證：缺 index.html ─────────────────────────────
+echo "5. 本機驗證：缺根目錄 index.html"
 build_site
 rm -f "${SITE_DIR}/index.html"
 SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then bad "缺 index.html 應失敗"; else ok "缺 index.html 時 exit code 非 0"; fi
 assert_contains "${LOG}" "index.html" "錯誤訊息提到 index.html"
 
-# ── 7. 本機驗證：超過 20MB ────────────────────────────────
-echo "7. 本機驗證：目錄超過 20 MB"
+# ── 6. 本機驗證：超過 20MB ────────────────────────────────
+echo "6. 本機驗證：目錄超過 20 MB"
 build_site
 truncate -s 21M "${SITE_DIR}/big.bin"
 if run_deploy; then bad "超過 20MB 應失敗"; else ok "超過 20MB 時 exit code 非 0"; fi
 assert_contains "${LOG}" "20 MB" "錯誤訊息提到 20 MB"
 
-# ── 8. 本機驗證：檔案數超過 2000 ──────────────────────────
-echo "8. 本機驗證：檔案數超過 2000"
+# ── 7. 本機驗證：檔案數超過 2000 ──────────────────────────
+echo "7. 本機驗證：檔案數超過 2000"
 build_site
 mkdir -p "${SITE_DIR}/many"
 for i in $(seq 1 2001); do
@@ -266,8 +253,8 @@ done
 if run_deploy; then bad "超過 2000 檔應失敗"; else ok "超過 2000 檔時 exit code 非 0"; fi
 assert_contains "${LOG}" "2000" "錯誤訊息提到檔案數上限"
 
-# ── 9. 本機驗證：符號連結（伺服器會 400 pages_bad_archive） ─
-echo "9. 本機驗證：目錄含符號連結"
+# ── 8. 本機驗證：符號連結（伺服器會 400 pages_bad_archive） ─
+echo "8. 本機驗證：目錄含符號連結"
 build_site
 ln -s /etc/passwd "${SITE_DIR}/leak.txt"
 mkdir -p "${SITE_DIR}/node_modules/.bin"
@@ -280,20 +267,18 @@ assert_contains "${LOG}" "leak.txt" "列出 symlink 路徑"
 assert_not_contains "${LOG}" "node_modules/.bin/fake" "被 tar 排除的 symlink 不列入"
 if [[ -f "${SERVER_ROOT}/request.json" ]]; then bad "含 symlink 不應呼叫 API"; else ok "含 symlink 不呼叫 API"; fi
 
-# ── 10. create-site=false 不帶 create ─────────────────────
-echo "10. create-site=false 不帶 create 參數"
+# ── 9. create-site=false 不帶 create ──────────────────────
+echo "9. create-site=false 不帶 create 參數"
 build_site
 set_response <<'JSON'
-{"status":201,"body":{"deployment":{"id":44,"status":"ready","active":true},"site":{"slug":"demo"}}}
+{"status":201,"body":{"deployment":{"id":44},"site":{"slug":"demo"}}}
 JSON
 SITE_SLUG="demo" SITE_BRANCH="main" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then ok "create-site=false 成功"; else bad "create-site=false 成功"; fi
 assert_equals "$(jq -r '.path' "${REQUEST}")" "/api/v1/pages/sites/demo/deployments?via=action&branch=main" "無 create 參數"
-assert_contains "${LOG}" "部署成功" "生產分支部署成功訊息"
-assert_not_contains "${LOG}" "非生產分支" "生產分支不顯示 activate 提示"
 
-# ── 11. 非 JSON 回應不崩潰 ────────────────────────────────
-echo "11. 非 JSON 回應（例如反向代理錯誤頁）"
+# ── 10. 非 JSON 回應不崩潰 ───────────────────────────────
+echo "10. 非 JSON 回應（例如反向代理錯誤頁）"
 build_site
 set_response <<'JSON'
 {"status":502,"rawBody":"<html>502 Bad Gateway</html>"}
@@ -302,8 +287,8 @@ SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then bad "502 應失敗"; else ok "502 時 exit code 非 0"; fi
 assert_contains "${LOG}" "HTTP 502" "錯誤訊息含 HTTP 狀態"
 
-# ── 12. 既有 purge / upload-ssl inline step 行為不變 ───────
-echo "12. 既有 purge / upload-ssl inline step（直接執行 action.yml 的 run 區塊）"
+# ── 11. 既有 purge / upload-ssl inline step 行為不變 ───────
+echo "11. 既有 purge / upload-ssl inline step（直接執行 action.yml 的 run 區塊）"
 python3 - "${ROOT}/action.yml" "${WORK}" <<'PY'
 import sys
 
