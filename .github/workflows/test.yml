@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck scripts/*.sh
+
+      - name: Bash syntax check
+        run: |
+          for file in scripts/*.sh; do
+            bash -n "${file}"
+          done
+
+      - name: Validate action.yml
+        run: |
+          python3 - <<'PY'
+          import yaml
+
+          with open("action.yml", encoding="utf-8") as fh:
+              data = yaml.safe_load(fh)
+
+          assert data["runs"]["using"] == "composite", data["runs"]["using"]
+          expected_inputs = {
+              "action", "api-key", "domain-id", "cert", "key",
+              "site", "dir", "branch", "message", "create-site", "base-url",
+          }
+          missing = expected_inputs - set(data["inputs"])
+          assert not missing, f"missing inputs: {sorted(missing)}"
+          expected_outputs = {"result", "deployment-id", "url", "preview-url", "status"}
+          missing = expected_outputs - set(data["outputs"])
+          assert not missing, f"missing outputs: {sorted(missing)}"
+          assert data["inputs"]["base-url"]["default"] == "https://cdn.taipei"
+          print("action.yml ok")
+          PY
+
+      - name: pages-deploy integration test
+        run: bash scripts/test-pages-deploy.sh

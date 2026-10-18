@@ -1,5 +1,5 @@
 name: 'FurCDN API'
-description: 'Manage FurCDN resources from GitHub Actions — purge cache, upload SSL certificates.'
+description: 'Manage FurCDN resources from GitHub Actions — purge cache, upload SSL certificates, deploy static sites (Pages).'
 author: 'FurCDN'
 branding:
   icon: 'cloud'
@@ -7,14 +7,15 @@ branding:
 
 inputs:
   action:
-    description: 'Operation to run: purge | upload-ssl'
+    description: 'Operation to run: purge | upload-ssl | pages-deploy'
     required: true
   api-key:
     description: 'FurCDN API key (fck_...). Store as a repository secret.'
     required: true
   domain-id:
-    description: 'Target domain ID.'
-    required: true
+    description: 'Target domain ID. Required when action=purge or action=upload-ssl.'
+    required: false
+    default: ''
   cert:
     description: 'PEM certificate. Required when action=upload-ssl.'
     required: false
@@ -23,20 +24,54 @@ inputs:
     description: 'PEM private key. Required when action=upload-ssl.'
     required: false
     default: ''
+  site:
+    description: 'Pages site slug (3-40 chars, lowercase letters/digits/hyphen). Required when action=pages-deploy.'
+    required: false
+    default: ''
+  dir:
+    description: 'Directory to deploy (must contain index.html at its root). Used when action=pages-deploy.'
+    required: false
+    default: 'dist'
+  branch:
+    description: 'Branch name reported to FurCDN Pages. Defaults to the site production branch. Usually ${{ github.ref_name }}.'
+    required: false
+    default: ''
+  message:
+    description: 'Deployment message shown in the dashboard.'
+    required: false
+    default: ''
+  create-site:
+    description: 'Create the Pages site if it does not exist yet (true/false). Used when action=pages-deploy.'
+    required: false
+    default: 'false'
   base-url:
     description: 'FurCDN API base URL.'
     required: false
-    default: 'https://www.furcdn.us'
+    default: 'https://cdn.taipei'
 
 outputs:
   result:
     description: 'Raw JSON response from the FurCDN API.'
-    value: ${{ steps.run.outputs.result }}
+    value: ${{ steps.pages.outputs.result || steps.run.outputs.result }}
+  deployment-id:
+    description: 'Pages deployment ID (pages-deploy only).'
+    value: ${{ steps.pages.outputs.deployment-id }}
+  url:
+    description: 'Production URL of the Pages site (pages-deploy only).'
+    value: ${{ steps.pages.outputs.url }}
+  preview-url:
+    description: 'Preview URL of this deployment (pages-deploy only).'
+    value: ${{ steps.pages.outputs.preview-url }}
+  status:
+    description: 'Deployment status: ready | held (pages-deploy only).'
+    value: ${{ steps.pages.outputs.status }}
 
 runs:
   using: 'composite'
   steps:
     - id: run
+      name: Purge cache / upload SSL
+      if: inputs.action != 'pages-deploy'
       shell: bash
       env:
         FURCDN_ACTION: ${{ inputs.action }}
@@ -53,9 +88,9 @@ runs:
         if [ -n "${FURCDN_KEY}" ]; then echo "::add-mask::${FURCDN_KEY}"; fi
 
         case "${FURCDN_ACTION}" in
-          purge|upload-ssl) ;;
+          purge|upload-ssl|pages-deploy) ;;
           *)
-            echo "::error::Unknown action '${FURCDN_ACTION}'. Use 'purge' or 'upload-ssl'."
+            echo "::error::Unknown action '${FURCDN_ACTION}'. Use 'purge', 'upload-ssl' or 'pages-deploy'."
             exit 1
             ;;
         esac
@@ -112,3 +147,19 @@ runs:
           printf '%s\n' "${body}"
           echo '__FURCDN_EOF__'
         } >> "${GITHUB_OUTPUT}"
+
+    - id: pages
+      name: Deploy Pages site
+      if: inputs.action == 'pages-deploy'
+      shell: bash
+      env:
+        FURCDN_API_KEY: ${{ inputs.api-key }}
+        FURCDN_BASE_URL: ${{ inputs.base-url }}
+        FURCDN_SITE: ${{ inputs.site }}
+        FURCDN_DIR: ${{ inputs.dir }}
+        FURCDN_BRANCH: ${{ inputs.branch }}
+        FURCDN_MESSAGE: ${{ inputs.message }}
+        FURCDN_CREATE_SITE: ${{ inputs.create-site }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/scripts/pages-deploy.sh"
