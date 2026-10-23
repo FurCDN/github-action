@@ -33,7 +33,7 @@ inputs:
     required: false
     default: 'dist'
   branch:
-    description: 'Branch name reported to FurCDN Pages. Defaults to the site production branch. Usually ${{ github.ref_name }}. Deployments from other branches are stored but not activated.'
+    description: 'Branch name reported to FurCDN Pages. Defaults to the site production branch. Usually fill in the branch name from the workflow context (github.ref_name). Deployments from other branches are stored but not activated.'
     required: false
     default: ''
   message:
