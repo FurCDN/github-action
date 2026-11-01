@@ -16,6 +16,18 @@ inputs:
     description: 'Target domain ID. Required when action=purge or action=upload-ssl.'
     required: false
     default: ''
+  urls:
+    description: 'Newline-separated list of exact URLs (or paths starting with /) to purge. Blank lines and surrounding whitespace are ignored. Leave empty together with prefixes/patterns to purge the whole domain cache. Used when action=purge.'
+    required: false
+    default: ''
+  prefixes:
+    description: 'Newline-separated list of URL path prefixes to purge, for example /static/ (matches /static/a.js and /static/x/y.css). Used when action=purge.'
+    required: false
+    default: ''
+  patterns:
+    description: 'Newline-separated list of glob patterns over the URL path to purge, for example /assets/*.js. The wildcard * matches any characters including /. Used when action=purge.'
+    required: false
+    default: ''
   cert:
     description: 'PEM certificate. Required when action=upload-ssl.'
     required: false
@@ -56,6 +68,12 @@ outputs:
   deployment-id:
     description: 'Pages deployment ID (pages-deploy only).'
     value: ${{ steps.pages.outputs.deployment-id }}
+  mode:
+    description: 'Purge mode reported by the API: all or selective (purge only).'
+    value: ${{ steps.run.outputs.mode }}
+  removed:
+    description: 'Number of cache entries removed, summed across nodes (selective purge only; empty for whole-domain purge).'
+    value: ${{ steps.run.outputs.removed }}
 
 runs:
   using: 'composite'
@@ -68,6 +86,9 @@ runs:
         FURCDN_ACTION: ${{ inputs.action }}
         FURCDN_API_KEY: ${{ inputs.api-key }}
         FURCDN_DOMAIN_ID: ${{ inputs.domain-id }}
+        FURCDN_PURGE_URLS: ${{ inputs.urls }}
+        FURCDN_PURGE_PREFIXES: ${{ inputs.prefixes }}
+        FURCDN_PURGE_PATTERNS: ${{ inputs.patterns }}
         FURCDN_CERT: ${{ inputs.cert }}
         FURCDN_KEY: ${{ inputs.key }}
         FURCDN_BASE_URL: ${{ inputs.base-url }}
@@ -77,6 +98,50 @@ runs:
         echo "::add-mask::${FURCDN_API_KEY}"
         if [ -n "${FURCDN_CERT}" ]; then echo "::add-mask::${FURCDN_CERT}"; fi
         if [ -n "${FURCDN_KEY}" ]; then echo "::add-mask::${FURCDN_KEY}"; fi
+
+        # ── 選擇性清除的共用限制（與 API 相同，提早失敗） ──────
+        readonly PURGE_MAX_ENTRIES=100        # urls + prefixes + patterns 總筆數上限
+        readonly PURGE_MAX_ENTRY_LENGTH=2048  # 單筆項目長度上限
+
+        # 去頭尾空白、略過空行，輸出「每行一筆」的字串（可能為空字串）。
+        purge_normalize() {
+          local raw="${1-}" line out=""
+          while IFS= read -r line || [ -n "${line}" ]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [ -n "${line}" ]; then
+              out+="${line}"$'\n'
+            fi
+          done <<<"${raw}"
+          printf '%s' "${out}"
+        }
+
+        # 驗證每筆長度，並累加總筆數到 purge_count。
+        purge_validate() {
+          local kind="$1" entries="$2" line
+          while IFS= read -r line || [ -n "${line}" ]; do
+            if [ -z "${line}" ]; then
+              continue
+            fi
+            purge_count=$((purge_count + 1))
+            if [ "${#line}" -gt "${PURGE_MAX_ENTRY_LENGTH}" ]; then
+              echo "::error::${kind} 的單筆項目超過 ${PURGE_MAX_ENTRY_LENGTH} 字元（目前 ${#line} 字元）。"
+              exit 1
+            fi
+          done <<<"${entries}"
+        }
+
+        # stdin 每行一筆，輸出精簡 JSON 陣列（空輸入為 []）。
+        purge_json_array() {
+          jq -R -s -c 'split("\n") | map(select(length > 0))'
+        }
+
+        # 從 API 回應取欄位；非 JSON 或缺少欄位時回空字串，不讓 step 失敗。
+        json_field() {
+          local value
+          value="$(jq -r "$1" <<<"${2}" 2>/dev/null)" || value=""
+          printf '%s' "${value}"
+        }
 
         case "${FURCDN_ACTION}" in
           purge|upload-ssl|pages-deploy) ;;
@@ -96,13 +161,47 @@ runs:
 
         case "${FURCDN_ACTION}" in
           purge)
-            echo "Purging cache for domain ${FURCDN_DOMAIN_ID}..."
-            http_code=$(curl -sS \
-              -o "${response_file}" \
-              -w "%{http_code}" \
-              -X POST \
-              -H "Authorization: Bearer ${FURCDN_API_KEY}" \
-              "${FURCDN_BASE_URL}/api/v1/domains/${FURCDN_DOMAIN_ID}/purge")
+            purge_count=0
+            purge_urls="$(purge_normalize "${FURCDN_PURGE_URLS-}")"
+            purge_prefixes="$(purge_normalize "${FURCDN_PURGE_PREFIXES-}")"
+            purge_patterns="$(purge_normalize "${FURCDN_PURGE_PATTERNS-}")"
+            purge_validate "urls" "${purge_urls}"
+            purge_validate "prefixes" "${purge_prefixes}"
+            purge_validate "patterns" "${purge_patterns}"
+
+            if [ "${purge_count}" -gt "${PURGE_MAX_ENTRIES}" ]; then
+              echo "::error::選擇性清除最多 ${PURGE_MAX_ENTRIES} 筆（urls + prefixes + patterns），目前 ${purge_count} 筆。"
+              exit 1
+            fi
+
+            if [ "${purge_count}" -eq 0 ]; then
+              echo "Purging cache for domain ${FURCDN_DOMAIN_ID}..."
+              http_code=$(curl -sS \
+                -o "${response_file}" \
+                -w "%{http_code}" \
+                -X POST \
+                -H "Authorization: Bearer ${FURCDN_API_KEY}" \
+                "${FURCDN_BASE_URL}/api/v1/domains/${FURCDN_DOMAIN_ID}/purge")
+            else
+              echo "Purging ${purge_count} selected cache entries for domain ${FURCDN_DOMAIN_ID}..."
+              urls_json="$(printf '%s' "${purge_urls}" | purge_json_array)"
+              prefixes_json="$(printf '%s' "${purge_prefixes}" | purge_json_array)"
+              patterns_json="$(printf '%s' "${purge_patterns}" | purge_json_array)"
+              purge_body="$(jq -n -c \
+                --argjson urls "${urls_json}" \
+                --argjson prefixes "${prefixes_json}" \
+                --argjson patterns "${patterns_json}" \
+                '{urls: $urls, prefixes: $prefixes, patterns: $patterns}
+                 | with_entries(select(.value | length > 0))')"
+              http_code=$(printf '%s' "${purge_body}" | curl -sS \
+                -o "${response_file}" \
+                -w "%{http_code}" \
+                -X POST \
+                -H "Authorization: Bearer ${FURCDN_API_KEY}" \
+                -H "Content-Type: application/json" \
+                --data-binary "@-" \
+                "${FURCDN_BASE_URL}/api/v1/domains/${FURCDN_DOMAIN_ID}/purge")
+            fi
             ;;
           upload-ssl)
             if [ -z "${FURCDN_CERT}" ] || [ -z "${FURCDN_KEY}" ]; then
@@ -132,6 +231,23 @@ runs:
 
         echo "HTTP ${http_code}"
         echo "${body}"
+
+        if [ "${FURCDN_ACTION}" = "purge" ]; then
+          purge_mode="$(json_field '.mode // empty' "${body}")"
+          purge_success="$(json_field '.success // empty' "${body}")"
+          purge_total="$(json_field '.total // empty' "${body}")"
+          purge_removed="$(json_field 'if has("removed") then (.removed | tostring) else empty end' "${body}")"
+          if [ -n "${purge_mode}" ]; then
+            echo "清除模式：${purge_mode}（成功 ${purge_success:-?}/${purge_total:-?} 個節點）"
+          fi
+          if [ -n "${purge_removed}" ]; then
+            echo "已清除 ${purge_removed} 筆快取項目"
+          fi
+          {
+            echo "mode=${purge_mode}"
+            echo "removed=${purge_removed}"
+          } >> "${GITHUB_OUTPUT}"
+        fi
 
         {
           echo 'result<<__FURCDN_EOF__'

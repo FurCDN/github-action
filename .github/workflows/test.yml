@@ -34,16 +34,22 @@ jobs:
           assert data["runs"]["using"] == "composite", data["runs"]["using"]
           expected_inputs = {
               "action", "api-key", "domain-id", "cert", "key",
+              "urls", "prefixes", "patterns",
               "site", "dir", "branch", "message", "create-site", "base-url",
           }
           missing = expected_inputs - set(data["inputs"])
           assert not missing, f"missing inputs: {sorted(missing)}"
-          expected_outputs = {"result", "deployment-id"}
+          expected_outputs = {"result", "deployment-id", "mode", "removed"}
           missing = expected_outputs - set(data["outputs"])
           assert not missing, f"missing outputs: {sorted(missing)}"
           assert data["inputs"]["base-url"]["default"] == "https://cdn.taipei"
+          for name in ("urls", "prefixes", "patterns"):
+              assert data["inputs"][name]["default"] == "", name
           print("action.yml ok")
           PY
 
       - name: pages-deploy integration test
         run: bash scripts/test-pages-deploy.sh
+
+      - name: purge test
+        run: bash scripts/test-purge.sh

@@ -37,6 +37,61 @@ jobs:
           domain-id: 123
 ```
 
+### 選擇性清除（只刷部分快取）
+
+`action: purge` 不帶 `urls` / `prefixes` / `patterns` 時維持原本行為：清掉整個域名的快取（不送 request body），既有 workflow 不用改。三個輸入都是「一行一筆」的清單（空行與前後空白會自動忽略），可以同時使用，條件之間是 OR；三者的總筆數上限 100 筆、單筆最長 2048 字元，超過會在本機直接失敗，不會呼叫 API。
+
+| 輸入 | 比對方式 | 範例 | 會清到 |
+|---|---|---|---|
+| `urls` | 完全相符的 URL，或 `/` 開頭的路徑（query string 算在比對範圍內） | `/index.html` | 只有 `/index.html`，不會清 `/index.html?v=2` |
+| `prefixes` | 路徑前綴，忽略 query string | `/static/` | `/static/a.js`、`/static/x/y.css` |
+| `patterns` | 路徑 glob，`*` 可比對任意字元（含 `/`），須以 `/` 開頭 | `/assets/*.js` | `/assets/a.js`、`/assets/js/b.js` |
+
+部署完只刷首頁與 `/static/`：
+
+```yaml
+      - uses: FurCDN/github-action@v1
+        id: purge
+        with:
+          action: purge
+          api-key: ${{ secrets.FURCDN_API_KEY }}
+          domain-id: 123
+          urls: /index.html
+          prefixes: /static/
+```
+
+用 glob 一次清掉某個目錄下的所有 JS／CSS：
+
+```yaml
+      - uses: FurCDN/github-action@v1
+        with:
+          action: purge
+          api-key: ${{ secrets.FURCDN_API_KEY }}
+          domain-id: 123
+          patterns: |
+            /assets/*.js
+            /assets/*.css
+```
+
+多筆就換行；`urls` 也可以寫完整 URL（host 必須等於該域名）：
+
+```yaml
+          urls: |
+            https://example.com/
+            /index.html
+            /robots.txt
+```
+
+清除結果會印在 log，也能透過 `mode`、`removed` outputs 取得。`removed` 是所有節點刪除的快取筆數總和（同一個 URL 快取在 3 個節點就算 3 筆）：
+
+```yaml
+      - run: echo "模式 ${{ steps.purge.outputs.mode }}，刪除 ${{ steps.purge.outputs.removed }} 筆"
+```
+
+> 快取規則（TTL、「不快取」規則）只在節點回源時套用；改規則不會動到已經快取的內容，要讓新規則立刻生效就得 purge（改完規則跑一次全站清除即可）。
+
+> 速率限制：全站清除每位使用者每 5 分鐘 10 次；選擇性清除每 5 分鐘 60 次。超過會回 `429`，step 隨之失敗。
+
 ### Vercel 部署成功後自動刷快取
 
 監聽 GitHub 的 `deployment_status` 事件，當 Vercel Production 部署成功時自動 purge。
@@ -168,6 +223,9 @@ jobs:
 | `action` | ✅ | — | 操作類型：`purge`、`upload-ssl` 或 `pages-deploy` |
 | `api-key` | ✅ | — | FurCDN API key (`fck_...`) |
 | `domain-id` | purge / upload-ssl 必填 | `''` | 目標域名 ID |
+| `urls` | — | `''` | 要清除的完整 URL 或 `/` 開頭路徑，一行一筆（`purge` 用；留空代表全站清除） |
+| `prefixes` | — | `''` | 要清除的路徑前綴，一行一筆，例如 `/static/`（`purge` 用） |
+| `patterns` | — | `''` | 要清除的路徑 glob，一行一筆，例如 `/assets/*.js`（`purge` 用） |
 | `cert` | upload-ssl 必填 | `''` | PEM 憑證字串 |
 | `key` | upload-ssl 必填 | `''` | PEM 私鑰字串 |
 | `site` | pages-deploy 必填 | `''` | Pages 站點 slug |
@@ -183,6 +241,8 @@ jobs:
 |---|---|
 | `result` | FurCDN API 回應的原始 JSON 內容 |
 | `deployment-id` | Pages deployment ID（`pages-deploy`） |
+| `mode` | 清除模式：`all`（全站）或 `selective`（選擇性） |
+| `removed` | 刪除的快取筆數總和；全站清除時為空字串 |
 
 ```yaml
 - id: purge
@@ -193,6 +253,7 @@ jobs:
     domain-id: 123
 
 - run: echo "${{ steps.purge.outputs.result }}"
+- run: echo "mode=${{ steps.purge.outputs.mode }} removed=${{ steps.purge.outputs.removed }}"
 ```
 
 ```yaml
@@ -228,6 +289,7 @@ jobs:
 
 ```bash
 bash scripts/test-pages-deploy.sh   # 整合測試
+bash scripts/test-purge.sh          # purge（含選擇性清除）測試
 shellcheck scripts/*.sh             # 靜態檢查
 ```
 
