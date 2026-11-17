@@ -213,7 +213,7 @@ assert_equals "$(cat "${OUT}")" "" "失敗時不寫 outputs"
 echo "3. 伺服器 413（pages_site_too_large，不再輸出 reasons）"
 build_site
 set_response <<'JSON'
-{"status":413,"body":{"error":"站點超過 20 MB 上限","code":"pages_site_too_large","reasons":["這段不應被輸出"]}}
+{"status":413,"body":{"error":"站點超過 40 MB 上限","code":"pages_site_too_large","reasons":["這段不應被輸出"]}}
 JSON
 if run_deploy; then bad "413 應失敗"; else ok "413 時 exit code 非 0"; fi
 assert_contains "${LOG}" "code=pages_site_too_large" "錯誤含 code"
