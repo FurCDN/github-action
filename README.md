@@ -209,7 +209,7 @@ jobs:
 
 - `site` 格式（`^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`）
 - `dir` 存在且根目錄有 `index.html`
-- 目錄內容 ≤ 20 MB、檔案數 ≤ 2000（不含 `.git`、`node_modules`、`.DS_Store`）
+- 目錄內容 ≤ 40 MB、檔案數 ≤ 2000（不含 `.git`、`node_modules`、`.DS_Store`）
 - 不含符號連結（symlink）：FurCDN Pages 只接受一般檔案，偵測到會列出前 5 個路徑並中止
 
 封存檔為 tar.gz，上傳時自動排除 `.git`、`node_modules`、`.DS_Store`。
@@ -280,7 +280,7 @@ jobs:
 `pages-deploy` 的錯誤會帶上伺服器的錯誤訊息與 `code`：
 
 ```
-::error::FurCDN Pages 部署失敗：HTTP 413 — 站點超過 20 MB 上限（code=pages_site_too_large）
+::error::FurCDN Pages 部署失敗：HTTP 413 — 站點超過 40 MB 上限（code=pages_site_too_large）
 ```
 
 ## 開發

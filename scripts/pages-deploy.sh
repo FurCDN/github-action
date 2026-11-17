@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # 與 furcdn-master/lib/pages/constants.ts 保持一致的上傳前限制
-readonly PAGES_SITE_MAX_BYTES=20971520   # 20 MiB：單一站點（解壓後）上限
+readonly PAGES_SITE_MAX_BYTES=41943040   # 40 MiB：單一站點（解壓後）上限
 readonly PAGES_MAX_FILES=2000            # 單一 deployment 檔案數上限
 
 readonly SITE="${FURCDN_SITE:-}"
@@ -80,7 +80,7 @@ read -r total_bytes total_files < <(
 ) || die "無法讀取目錄 '${DIR}' 的檔案清單。"
 
 if (( total_bytes > PAGES_SITE_MAX_BYTES )); then
-  die "站點大小 $(( total_bytes / 1024 / 1024 )) MB 超過單站上限 20 MB（共 ${total_files} 個檔案）。請縮減 ${DIR} 的內容。"
+  die "站點大小 $(( total_bytes / 1024 / 1024 )) MB 超過單站上限 40 MB（共 ${total_files} 個檔案）。請縮減 ${DIR} 的內容。"
 fi
 
 if (( total_files > PAGES_MAX_FILES )); then

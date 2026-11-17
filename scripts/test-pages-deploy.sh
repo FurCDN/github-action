@@ -236,12 +236,12 @@ SITE_SLUG="demo" SITE_BRANCH="" SITE_MESSAGE="" SITE_CREATE="false"
 if run_deploy; then bad "缺 index.html 應失敗"; else ok "缺 index.html 時 exit code 非 0"; fi
 assert_contains "${LOG}" "index.html" "錯誤訊息提到 index.html"
 
-# ── 6. 本機驗證：超過 20MB ────────────────────────────────
-echo "6. 本機驗證：目錄超過 20 MB"
+# ── 6. 本機驗證：超過 40MB ────────────────────────────────
+echo "6. 本機驗證：目錄超過 40 MB"
 build_site
-truncate -s 21M "${SITE_DIR}/big.bin"
-if run_deploy; then bad "超過 20MB 應失敗"; else ok "超過 20MB 時 exit code 非 0"; fi
-assert_contains "${LOG}" "20 MB" "錯誤訊息提到 20 MB"
+truncate -s 41M "${SITE_DIR}/big.bin"
+if run_deploy; then bad "超過 40MB 應失敗"; else ok "超過 40MB 時 exit code 非 0"; fi
+assert_contains "${LOG}" "40 MB" "錯誤訊息提到 40 MB"
 
 # ── 7. 本機驗證：檔案數超過 2000 ──────────────────────────
 echo "7. 本機驗證：檔案數超過 2000"
